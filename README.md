@@ -11,6 +11,7 @@ This repository supports training and evaluation on three text-based person sear
 - pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu118
 - transformers 4.8.1
 - timm 0.4.9
+- ruamel.yaml
 
 ### Prepare Datasets
 1. Download the CUHK-PEDES dataset from [here](https://github.com/ShuangLI59/Person-Search-with-Natural-Language-Description), ICFG-PEDES dataset from [here](https://github.com/zifyloo/SSAN) and RSTPReid dataset form [here](https://github.com/NjtechCVLab/RSTPReid-Dataset)
