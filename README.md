@@ -8,8 +8,7 @@ This repository supports training and evaluation on three text-based person sear
 
 ## Usage
 ### Requirements
-- pytorch 1.9.1
-- torchvision 0.10.1
+- pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu118
 - transformers 4.8.1
 - timm 0.4.9
 
