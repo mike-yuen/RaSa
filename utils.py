@@ -6,10 +6,12 @@ from collections import defaultdict, deque
 import torch
 import torch.distributed as dist
 
+
 class SmoothedValue(object):
     """Track a series of values and provide access to smoothed values over a
     window or the global series average.
     """
+
     def __init__(self, window_size=20, fmt=None):
         if fmt is None:
             fmt = "{median:.4f} ({global_avg:.4f})"
@@ -29,7 +31,8 @@ class SmoothedValue(object):
         """
         if not is_dist_avail_and_initialized():
             return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
+        t = torch.tensor([self.count, self.total],
+                         dtype=torch.float64, device='cuda')
         dist.barrier()
         dist.all_reduce(t)
         t = t.tolist()
@@ -66,6 +69,7 @@ class SmoothedValue(object):
             max=self.max,
             value=self.value)
 
+
 class MetricLogger(object):
     def __init__(self, delimiter="\t"):
         self.meters = defaultdict(SmoothedValue)
@@ -100,8 +104,8 @@ class MetricLogger(object):
             loss_str.append(
                 "{}: {:.4f}".format(name, meter.global_avg)
             )
-        return self.delimiter.join(loss_str)    
-    
+        return self.delimiter.join(loss_str)
+
     def synchronize_between_processes(self):
         for meter in self.meters.values():
             meter.synchronize_between_processes()
@@ -155,10 +159,12 @@ class MetricLogger(object):
         print('{} Total time: {} ({:.4f} s / it)'.format(
             header, total_time_str, total_time / len(iterable)))
 
+
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):
         super(AttrDict, self).__init__(*args, **kwargs)
         self.__dict__ = self
+
 
 def setup_for_distributed(is_master):
     """
@@ -173,6 +179,7 @@ def setup_for_distributed(is_master):
             builtin_print(*args, **kwargs)
     __builtin__.print = print
 
+
 def is_dist_avail_and_initialized():
     if not dist.is_available():
         return False
@@ -180,18 +187,22 @@ def is_dist_avail_and_initialized():
         return False
     return True
 
+
 def get_world_size():
     if not is_dist_avail_and_initialized():
         return 1
     return dist.get_world_size()
+
 
 def get_rank():
     if not is_dist_avail_and_initialized():
         return 0
     return dist.get_rank()
 
+
 def is_main_process():
     return get_rank() == 0
+
 
 def init_distributed_mode(args):
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
@@ -207,7 +218,7 @@ def init_distributed_mode(args):
         return
     args.distributed = True
     torch.cuda.set_device(args.gpu)
-    args.dist_backend = 'nccl'
+    args.dist_backend = 'gloo'  # 'nccl' for linux
     print('| distributed init (rank {}): {}'.format(
         args.rank, args.dist_url), flush=True)
     torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,

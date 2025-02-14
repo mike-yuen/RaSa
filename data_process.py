@@ -3,6 +3,7 @@ import json
 import errno
 import argparse
 
+
 def mkdir_if_missing(directory):
     if not os.path.exists(directory):
         try:
@@ -10,6 +11,7 @@ def mkdir_if_missing(directory):
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -23,7 +25,8 @@ if __name__ == '__main__':
         raw_annotation_file_name = "ICFG-PEDES.json"
     elif args.dataset_name == "RSTPReid":
         raw_annotation_file_name = "data_captions.json"
-    raw_annotation_file_path = os.path.join(args.dataset_root_dir, raw_annotation_file_name)
+    raw_annotation_file_path = os.path.join(
+        args.dataset_root_dir, raw_annotation_file_name)
     # split raw annotations into training, validation and test dataset
     anns = json.load(open(raw_annotation_file_path, "r"))
     train = []

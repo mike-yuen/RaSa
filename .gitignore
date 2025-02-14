@@ -144,3 +144,4 @@ cython_debug/
 data/ALBEF/ALBEF.pth
 dataset/CUHK-PEDES
 dataset/RSTPReid
+output
