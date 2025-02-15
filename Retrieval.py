@@ -351,7 +351,7 @@ if __name__ == '__main__':
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
-    parser.add_argument('--distributed', default=True, type=bool)
+    parser.add_argument('--distributed', default=False, type=bool)
     args = parser.parse_args()
     yaml_loader = yaml.YAML()
     with open(args.config, 'r') as file:
