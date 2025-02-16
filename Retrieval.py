@@ -25,52 +25,72 @@ def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device,
     # train
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(
-        window_size=1, fmt='{value:.6f}'))
-    metric_logger.add_meter('loss_cl', utils.SmoothedValue(
-        window_size=1, fmt='{value:.4f}'))
-    metric_logger.add_meter('loss_pitm', utils.SmoothedValue(
-        window_size=1, fmt='{value:.4f}'))
-    metric_logger.add_meter('loss_mlm', utils.SmoothedValue(
-        window_size=1, fmt='{value:.4f}'))
-    metric_logger.add_meter('loss_prd', utils.SmoothedValue(
-        window_size=1, fmt='{value:.4f}'))
-    metric_logger.add_meter('loss_mrtd', utils.SmoothedValue(
-        window_size=1, fmt='{value:.4f}'))
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('loss_cl', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
+    metric_logger.add_meter('loss_pitm', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
+    metric_logger.add_meter('loss_mlm', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
+    metric_logger.add_meter('loss_prd', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
+    metric_logger.add_meter('loss_mrtd', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
+
     header = 'Train Epoch: [{}]'.format(epoch)
     print_freq = 50
     step_size = 100
     warmup_iterations = warmup_steps * step_size
-    for i, (image1, image2, text1, text2, idx, replace) in enumerate(
-            metric_logger.log_every(data_loader, print_freq, header)):
+
+    # # Mixed precision training
+    # scaler = torch.cuda.amp.GradScaler()    
+    # # Gradient accumulation settings
+    # accumulation_steps = max(1, config.get("accumulation_steps", 1))
+    # optimizer.zero_grad()
+    
+    for i, (image1, image2, text1, text2, idx, replace) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         image1 = image1.to(device, non_blocking=True)
         image2 = image2.to(device, non_blocking=True)
         idx = idx.to(device, non_blocking=True)
         replace = replace.to(device, non_blocking=True)
-        text_input1 = tokenizer(
-            text1, padding='longest', max_length=config['max_words'], return_tensors="pt").to(device)
-        text_input2 = tokenizer(
-            text2, padding='longest', max_length=config['max_words'], return_tensors="pt").to(device)
+
+        text_input1 = tokenizer(text1, padding='longest', max_length=config['max_words'], return_tensors="pt").to(device)
+        text_input2 = tokenizer(text2, padding='longest', max_length=config['max_words'], return_tensors="pt").to(device)
+        
         if epoch > 0 or not config['warm_up']:
             alpha = config['alpha']
         else:
             alpha = config['alpha'] * min(1.0, i / len(data_loader))
-        loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd = model(image1, image2, text_input1, text_input2,
-                                                                  alpha=alpha, idx=idx, replace=replace)
-        loss = 0.
-        for j, los in enumerate((loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd)):
-            loss += config['weights'][j] * los
+
+        # Forward pass using mixed precision
+        with torch.cuda.amp.autocast():
+            loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd = model(
+                image1, image2, text_input1, text_input2, alpha=alpha, idx=idx, replace=replace
+            )
+            loss = sum(config['weights'][j] * los for j, los in enumerate((loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd)))
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        # # Normalize loss for accumulation
+        # loss = loss / accumulation_steps
+        # scaler.scale(loss).backward()
+
+        # if (i + 1) % accumulation_steps == 0:
+        #     scaler.step(optimizer)
+        #     scaler.update()
+        #     optimizer.zero_grad()
+        #     torch.cuda.empty_cache()  # Free unused memory
+
         metric_logger.update(loss_cl=loss_cl.item())
         metric_logger.update(loss_pitm=loss_pitm.item())
         metric_logger.update(loss_mlm=loss_mlm.item())
         metric_logger.update(loss_prd=loss_prd.item())
         metric_logger.update(loss_mrtd=loss_mrtd.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+
         if epoch == 0 and i % step_size == 0 and i <= warmup_iterations:
             scheduler.step(i // step_size)
+
+        # Delete unused variables to free memory
+        del image1, image2, text_input1, text_input2, loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd, loss
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger.global_avg())
