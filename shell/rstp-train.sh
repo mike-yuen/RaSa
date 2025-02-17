@@ -2,8 +2,8 @@ export CUDA_VISIBLE_DEVICES=0
 #export CUDA_VISIBLE_DEVICES=4,5,6,7
 export TF_ENABLE_ONEDNN_OPTS=0
 
-python -m torch.distributed.run --nproc_per_node=4 --rdzv_endpoint=127.0.0.1:29502 \
-Retrieval.py \
+# -m torch.distributed.run --nproc_per_node=4 --rdzv_endpoint=127.0.0.1:29502 \
+python Retrieval.py \
 --config configs/PS_rstp_reid.yaml \
 --output_dir output/rstp-reid/train \
 --checkpoint ./data/ALBEF/ALBEF.pth \

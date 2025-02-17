@@ -244,6 +244,7 @@ class ALBEF(nn.Module):
         image_feats = concat_all_gather(image_feat)
         text_feats = concat_all_gather(text_feat)
         idxs = concat_all_gather(idx)
+
         batch_size = image_feats.shape[0]
         ptr = int(self.queue_ptr)
         # replace the keys at ptr (dequeue and enqueue)
@@ -303,11 +304,13 @@ class ALBEF(nn.Module):
 def concat_all_gather(tensor):
     """
     Performs all_gather operation on the provided tensors.
-    *** Warning ***: torch.distributed.all_gather has no gradient.
+    If not in distributed mode, it simply returns the input tensor.
     """
-    tensors_gather = [torch.ones_like(tensor)
-                      for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
-
-    output = torch.cat(tensors_gather, dim=0)
-    return output
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        world_size = torch.distributed.get_world_size()
+        tensors_gather = [torch.ones_like(tensor) for _ in range(world_size)]
+        torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+        return torch.cat(tensors_gather, dim=0)
+    
+    # If not in distributed mode, return the tensor as is
+    return tensor
