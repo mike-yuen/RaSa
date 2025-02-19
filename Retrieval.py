@@ -235,12 +235,9 @@ def main(args, config):
     else:
         samplers = [None, None, None]
     train_loader, val_loader, test_loader = create_loader([train_dataset, val_dataset, test_dataset], samplers,
-                                                          batch_size=[config['batch_size_train']] + [
-                                                              config['batch_size_test']] * 2,
-                                                          num_workers=[
-                                                              4, 4, 4],
-                                                          is_trains=[
-                                                              True, False, False],
+                                                          batch_size=[config['batch_size_train']] + [config['batch_size_test']] * 2,
+                                                          num_workers=[4, 4, 4],
+                                                          is_trains=[True, False, False],
                                                           collate_fns=[None, None, None])
     tokenizer = BertTokenizer.from_pretrained(args.text_encoder)
 
@@ -334,7 +331,8 @@ def main(args, config):
                         best_log = log_stats
         if args.evaluate:
             break
-        dist.barrier()
+        if args.distributed:
+            dist.barrier()
         torch.cuda.empty_cache()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
