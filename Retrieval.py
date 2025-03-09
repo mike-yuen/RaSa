@@ -114,10 +114,8 @@ def evaluation(model, data_loader, tokenizer, device, config):
     text_atts = []
     for i in range(0, num_text, text_bs):
         text = texts[i: min(num_text, i + text_bs)]
-        text_input = tokenizer(text, padding='max_length', truncation=True,
-                               max_length=config['max_words'], return_tensors="pt").to(device)
-        text_output = model.text_encoder.bert(
-            text_input.input_ids, attention_mask=text_input.attention_mask, mode='text')
+        text_input = tokenizer(text, padding='max_length', truncation=True, max_length=config['max_words'], return_tensors="pt").to(device)
+        text_output = model.text_encoder.bert(text_input.input_ids, attention_mask=text_input.attention_mask, mode='text')
         text_feat = text_output.last_hidden_state
         text_embed = F.normalize(model.text_proj(text_feat[:, 0, :]))
         text_embeds.append(text_embed)
@@ -136,12 +134,11 @@ def evaluation(model, data_loader, tokenizer, device, config):
         image_embed = F.normalize(image_embed, dim=-1)
         image_feats.append(image_feat.cpu())
         image_embeds.append(image_embed)
-    image_feats = torch.cat(image_feats, dim=0)
+    image_feats = torch.cat(image_feats, dim=0).to(device) 
     image_embeds = torch.cat(image_embeds, dim=0)
     # compute the feature similarity score for all image-text pairs
     sims_matrix = text_embeds @ image_embeds.t()
-    score_matrix_t2i = torch.full(
-        (len(texts), len(data_loader.dataset.image)), -100.0).to(device)
+    score_matrix_t2i = torch.full((len(texts), len(data_loader.dataset.image)), -100.0).to(device)
     # take the top-k candidates and calculate their ITM score sitm for ranking
     num_tasks = utils.get_world_size()
     rank = utils.get_rank()
@@ -150,14 +147,11 @@ def evaluation(model, data_loader, tokenizer, device, config):
     end = min(sims_matrix.size(0), start + step)
     for i, sims in enumerate(metric_logger.log_every(sims_matrix[start:end], 50, header)):
         topk_sim, topk_idx = sims.topk(k=config['k_test'], dim=0)
-        encoder_output = image_feats[topk_idx]
-        encoder_att = torch.ones(encoder_output.size()[
-                                 :-1], dtype=torch.long).to(device)
+        encoder_output = image_feats[topk_idx.cpu()].to(device)
+        encoder_att = torch.ones(encoder_output.size()[:-1], dtype=torch.long).to(device)
         output = model.text_encoder.bert(encoder_embeds=text_feats[start + i].repeat(config['k_test'], 1, 1),
-                                         attention_mask=text_atts[start +
-                                                                  i].repeat(config['k_test'], 1),
-                                         encoder_hidden_states=encoder_output.to(
-                                             device),
+                                         attention_mask=text_atts[start + i].repeat(config['k_test'], 1),
+                                         encoder_hidden_states=encoder_output.to(device),
                                          encoder_attention_mask=encoder_att,
                                          return_dict=True,
                                          mode='fusion'
@@ -241,12 +235,9 @@ def main(args, config):
     else:
         samplers = [None, None, None]
     train_loader, val_loader, test_loader = create_loader([train_dataset, val_dataset, test_dataset], samplers,
-                                                          batch_size=[config['batch_size_train']] + [
-                                                              config['batch_size_test']] * 2,
-                                                          num_workers=[
-                                                              4, 4, 4],
-                                                          is_trains=[
-                                                              True, False, False],
+                                                          batch_size=[config['batch_size_train']] + [config['batch_size_test']] * 2,
+                                                          num_workers=[4, 4, 4],
+                                                          is_trains=[True, False, False],
                                                           collate_fns=[None, None, None])
     tokenizer = BertTokenizer.from_pretrained(args.text_encoder)
 
@@ -303,14 +294,11 @@ def main(args, config):
                 lr_scheduler.step(epoch + warmup_steps)
             if args.distributed:
                 train_loader.sampler.set_epoch(epoch)
-            train_stats = train(model, train_loader, optimizer, tokenizer, epoch, warmup_steps, device, lr_scheduler,
-                                config)
+            train_stats = train(model, train_loader, optimizer, tokenizer, epoch, warmup_steps, device, lr_scheduler, config)
         if epoch >= config['eval_epoch'] or args.evaluate:
-            score_test_t2i = evaluation(
-                model_without_ddp, test_loader, tokenizer, device, config)
+            score_test_t2i = evaluation(model_without_ddp, test_loader, tokenizer, device, config)
             if utils.is_main_process():
-                test_result = itm_eval(
-                    score_test_t2i, test_dataset.img2person, test_dataset.txt2person, args.eval_mAP)
+                test_result = itm_eval(score_test_t2i, test_dataset.img2person, test_dataset.txt2person, args.eval_mAP)
                 print('Test:', test_result, '\n')
                 if args.evaluate:
                     log_stats = {'epoch': epoch,
@@ -337,14 +325,14 @@ def main(args, config):
                     torch.save(save_obj, os.path.join(
                         args.output_dir, 'checkpoint_epoch%02d.pth' % epoch))
                     if test_result['r1'] > best:
-                        torch.save(save_obj, os.path.join(
-                            args.output_dir, 'checkpoint_best.pth'))
+                        torch.save(save_obj, os.path.join(args.output_dir, 'checkpoint_best.pth'))
                         best = test_result['r1']
                         best_epoch = epoch
                         best_log = log_stats
         if args.evaluate:
             break
-        dist.barrier()
+        if args.distributed:
+            dist.barrier()
         torch.cuda.empty_cache()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
