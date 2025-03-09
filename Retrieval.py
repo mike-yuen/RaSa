@@ -33,7 +33,7 @@ def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device,
     header = 'Train Epoch: [{}]'.format(epoch)
     print_freq = 50
     step_size = 100
-    warmup_iterations = warmup_steps * step_size   
+    warmup_iterations = warmup_steps * step_size
     for i, (image1, image2, text1, text2, idx, replace) in enumerate(
             metric_logger.log_every(data_loader, print_freq, header)):
         image1 = image1.to(device, non_blocking=True)
@@ -46,13 +46,11 @@ def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device,
             alpha = config['alpha']
         else:
             alpha = config['alpha'] * min(1.0, i / len(data_loader))
-
         loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd = model(image1, image2, text_input1, text_input2,
                                                                   alpha=alpha, idx=idx, replace=replace)
         loss = 0.
         for j, los in enumerate((loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd)):
             loss += config['weights'][j] * los
-
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -161,8 +159,7 @@ def itm_eval(scores_t2i, img2person, txt2person, eval_mAP):
     if eval_mAP:
         real_num = matches.sum(dim=-1)
         tmp_cmc = matches.cumsum(dim=-1).float()
-        order = torch.arange(
-            start=1, end=matches.size(1) + 1, dtype=torch.long)
+        order = torch.arange(start=1, end=matches.size(1) + 1, dtype=torch.long)
         tmp_cmc /= order
         tmp_cmc *= matches
         AP = tmp_cmc.sum(dim=-1) / real_num
