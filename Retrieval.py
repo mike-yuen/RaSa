@@ -20,7 +20,6 @@ from models.vit import interpolate_pos_embed
 from optim import create_optimizer
 from scheduler import create_scheduler
 
-
 def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device, scheduler, config):
     # train
     model.train()
@@ -31,66 +30,40 @@ def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device,
     metric_logger.add_meter('loss_mlm', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
     metric_logger.add_meter('loss_prd', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
     metric_logger.add_meter('loss_mrtd', utils.SmoothedValue(window_size=1, fmt='{value:.4f}'))
-
     header = 'Train Epoch: [{}]'.format(epoch)
     print_freq = 50
     step_size = 100
-    warmup_iterations = warmup_steps * step_size
-
-    # # Mixed precision training
-    # scaler = torch.cuda.amp.GradScaler()    
-    # # Gradient accumulation settings
-    # accumulation_steps = max(1, config.get("accumulation_steps", 1))
-    # optimizer.zero_grad()
-    
-    for i, (image1, image2, text1, text2, idx, replace) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
+    warmup_iterations = warmup_steps * step_size   
+    for i, (image1, image2, text1, text2, idx, replace) in enumerate(
+            metric_logger.log_every(data_loader, print_freq, header)):
         image1 = image1.to(device, non_blocking=True)
         image2 = image2.to(device, non_blocking=True)
         idx = idx.to(device, non_blocking=True)
         replace = replace.to(device, non_blocking=True)
-
         text_input1 = tokenizer(text1, padding='longest', max_length=config['max_words'], return_tensors="pt").to(device)
         text_input2 = tokenizer(text2, padding='longest', max_length=config['max_words'], return_tensors="pt").to(device)
-        
         if epoch > 0 or not config['warm_up']:
             alpha = config['alpha']
         else:
             alpha = config['alpha'] * min(1.0, i / len(data_loader))
 
-        # Forward pass using mixed precision
-        with torch.cuda.amp.autocast():
-            loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd = model(
-                image1, image2, text_input1, text_input2, alpha=alpha, idx=idx, replace=replace
-            )
-            loss = sum(config['weights'][j] * los for j, los in enumerate((loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd)))
+        loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd = model(image1, image2, text_input1, text_input2,
+                                                                  alpha=alpha, idx=idx, replace=replace)
+        loss = 0.
+        for j, los in enumerate((loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd)):
+            loss += config['weights'][j] * los
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
-        # # Normalize loss for accumulation
-        # loss = loss / accumulation_steps
-        # scaler.scale(loss).backward()
-
-        # if (i + 1) % accumulation_steps == 0:
-        #     scaler.step(optimizer)
-        #     scaler.update()
-        #     optimizer.zero_grad()
-        #     torch.cuda.empty_cache()  # Free unused memory
-
         metric_logger.update(loss_cl=loss_cl.item())
         metric_logger.update(loss_pitm=loss_pitm.item())
         metric_logger.update(loss_mlm=loss_mlm.item())
         metric_logger.update(loss_prd=loss_prd.item())
         metric_logger.update(loss_mrtd=loss_mrtd.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-
         if epoch == 0 and i % step_size == 0 and i <= warmup_iterations:
             scheduler.step(i // step_size)
-
-        # Delete unused variables to free memory
-        del image1, image2, text_input1, text_input2, loss_cl, loss_pitm, loss_mlm, loss_prd, loss_mrtd, loss
-
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger.global_avg())
@@ -160,13 +133,11 @@ def evaluation(model, data_loader, tokenizer, device, config):
         score_matrix_t2i[start + i, topk_idx] = score
     if args.distributed:
         dist.barrier()
-        torch.distributed.all_reduce(
-            score_matrix_t2i, op=torch.distributed.ReduceOp.SUM)
+        torch.distributed.all_reduce(score_matrix_t2i, op=torch.distributed.ReduceOp.SUM)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Evaluation time {}'.format(total_time_str))
     return score_matrix_t2i.cpu()
-
 
 @torch.no_grad()
 def itm_eval(scores_t2i, img2person, txt2person, eval_mAP):
@@ -230,12 +201,12 @@ def main(args, config):
     if args.distributed:
         num_tasks = utils.get_world_size()
         global_rank = utils.get_rank()
-        samplers = create_sampler(
-            [train_dataset], [True], num_tasks, global_rank) + [None, None]
+        samplers = create_sampler([train_dataset], [True], num_tasks, global_rank) + [None, None]
     else:
         samplers = [None, None, None]
     train_loader, val_loader, test_loader = create_loader([train_dataset, val_dataset, test_dataset], samplers,
-                                                          batch_size=[config['batch_size_train']] + [config['batch_size_test']] * 2,
+                                                          batch_size=[config['batch_size_train']] + [
+                                                              config['batch_size_test']] * 2,
                                                           num_workers=[4, 4, 4],
                                                           is_trains=[True, False, False],
                                                           collate_fns=[None, None, None])
@@ -250,8 +221,7 @@ def main(args, config):
 
     # Model
     print("Creating model")
-    model = ALBEF(config=config, text_encoder=args.text_encoder,
-                  tokenizer=tokenizer)
+    model = ALBEF(config=config, text_encoder=args.text_encoder, tokenizer=tokenizer)
     model = model.to(device)
     # Optimizer and learning rate scheduler
     arg_opt = utils.AttrDict(config['optimizer'])
@@ -270,8 +240,7 @@ def main(args, config):
             best_epoch = checkpoint['best_epoch']
         else:
             # reshape positional embedding to accomodate for image resolution change
-            pos_embed_reshaped = interpolate_pos_embed(
-                state_dict['visual_encoder.pos_embed'], model.visual_encoder)
+            pos_embed_reshaped = interpolate_pos_embed(state_dict['visual_encoder.pos_embed'], model.visual_encoder)
             state_dict['visual_encoder.pos_embed'] = pos_embed_reshaped
             m_pos_embed_reshaped = interpolate_pos_embed(state_dict['visual_encoder_m.pos_embed'],
                                                          model.visual_encoder_m)
@@ -282,8 +251,7 @@ def main(args, config):
 
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
     print("Start training")
@@ -294,7 +262,8 @@ def main(args, config):
                 lr_scheduler.step(epoch + warmup_steps)
             if args.distributed:
                 train_loader.sampler.set_epoch(epoch)
-            train_stats = train(model, train_loader, optimizer, tokenizer, epoch, warmup_steps, device, lr_scheduler, config)
+            train_stats = train(model, train_loader, optimizer, tokenizer, epoch, warmup_steps, device, lr_scheduler,
+                                config)
         if epoch >= config['eval_epoch'] or args.evaluate:
             score_test_t2i = evaluation(model_without_ddp, test_loader, tokenizer, device, config)
             if utils.is_main_process():
@@ -322,8 +291,7 @@ def main(args, config):
                         'best': best,
                         'best_epoch': best_epoch
                     }
-                    torch.save(save_obj, os.path.join(
-                        args.output_dir, 'checkpoint_epoch%02d.pth' % epoch))
+                    torch.save(save_obj, os.path.join(args.output_dir, 'checkpoint_epoch%02d.pth' % epoch))
                     if test_result['r1'] > best:
                         torch.save(save_obj, os.path.join(args.output_dir, 'checkpoint_best.pth'))
                         best = test_result['r1']
@@ -342,23 +310,19 @@ def main(args, config):
             f.write(f"best epoch: {best_epoch} / {max_epoch}\n")
             f.write(f"{best_log}\n\n")
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default='./configs/PS_cuhk_pedes.yaml')
     parser.add_argument('--output_dir', default='output/cuhk-pedes')
     parser.add_argument('--checkpoint', default='')
     parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--eval_mAP', action='store_true',
-                        help='whether to evaluate mAP')
+    parser.add_argument('--eval_mAP', action='store_true', help='whether to evaluate mAP')
     parser.add_argument('--text_encoder', default='bert-base-uncased')
     parser.add_argument('--evaluate', action='store_true')
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--world_size', default=1, type=int,
-                        help='number of distributed processes')
-    parser.add_argument('--dist_url', default='env://',
-                        help='url used to set up distributed training')
+    parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')
+    parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     parser.add_argument('--distributed', default=False, type=bool)
     args = parser.parse_args()
     yaml_loader = yaml.YAML()

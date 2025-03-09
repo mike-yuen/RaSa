@@ -272,11 +272,14 @@ class ALBEF(nn.Module):
 def concat_all_gather(tensor):
     """
     Performs all_gather operation on the provided tensors.
+    If not in distributed mode, it simply returns the input tensor.
     *** Warning ***: torch.distributed.all_gather has no gradient.
     """
-    tensors_gather = [torch.ones_like(tensor)
-                      for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        world_size = torch.distributed.get_world_size()
+        tensors_gather = [torch.ones_like(tensor) for _ in range(world_size)]
+        torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+        return torch.cat(tensors_gather, dim=0)
 
-    output = torch.cat(tensors_gather, dim=0)
-    return output
+    # If not in distributed mode, return the tensor as is
+    return tensor
