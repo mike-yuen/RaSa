@@ -5,7 +5,7 @@ import os
 import random
 import time
 import numpy as np
-import ruamel_yaml as yaml
+import ruamel.yaml as yaml
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
@@ -67,6 +67,7 @@ def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device,
     print("Averaged stats:", metric_logger.global_avg())
     return {k: "{:.3f}".format(meter.global_avg) for k, meter in metric_logger.meters.items()}
 
+
 @torch.no_grad()
 def evaluation(model, data_loader, tokenizer, device, config):
     # evaluate
@@ -104,7 +105,7 @@ def evaluation(model, data_loader, tokenizer, device, config):
         image_embed = F.normalize(image_embed, dim=-1)
         image_feats.append(image_feat.cpu())
         image_embeds.append(image_embed)
-    image_feats = torch.cat(image_feats, dim=0)
+    image_feats = torch.cat(image_feats, dim=0).to(device) 
     image_embeds = torch.cat(image_embeds, dim=0)
     # compute the feature similarity score for all image-text pairs
     sims_matrix = text_embeds @ image_embeds.t()
@@ -117,7 +118,7 @@ def evaluation(model, data_loader, tokenizer, device, config):
     end = min(sims_matrix.size(0), start + step)
     for i, sims in enumerate(metric_logger.log_every(sims_matrix[start:end], 50, header)):
         topk_sim, topk_idx = sims.topk(k=config['k_test'], dim=0)
-        encoder_output = image_feats[topk_idx]
+        encoder_output = image_feats[topk_idx.cpu()].to(device)
         encoder_att = torch.ones(encoder_output.size()[:-1], dtype=torch.long).to(device)
         output = model.text_encoder.bert(encoder_embeds=text_feats[start + i].repeat(config['k_test'], 1, 1),
                                          attention_mask=text_atts[start + i].repeat(config['k_test'], 1),
@@ -177,8 +178,9 @@ def itm_eval(scores_t2i, img2person, txt2person, eval_mAP):
                        }
     return eval_result
 
+
 def main(args, config):
-    utils.init_distributed_mode(args)
+    # utils.init_distributed_mode(args)
     device = torch.device(args.device)
     print(args)
     print(config)
@@ -294,7 +296,8 @@ def main(args, config):
                         best_log = log_stats
         if args.evaluate:
             break
-        dist.barrier()
+        if args.distributed:
+            dist.barrier()
         torch.cuda.empty_cache()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -313,13 +316,18 @@ if __name__ == '__main__':
     parser.add_argument('--eval_mAP', action='store_true', help='whether to evaluate mAP')
     parser.add_argument('--text_encoder', default='bert-base-uncased')
     parser.add_argument('--evaluate', action='store_true')
-    parser.add_argument('--device', default='cuda')
+    parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
-    parser.add_argument('--distributed', default=True, type=bool)
+    parser.add_argument('--distributed', default=False, type=bool)
     args = parser.parse_args()
-    config = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
+    yaml_loader = yaml.YAML()
+    with open(args.config, 'r') as file:
+        config = yaml_loader.load(file)
+
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    yaml.dump(config, open(os.path.join(args.output_dir, 'config.yaml'), 'w'))
+
+    with open(os.path.join(args.output_dir, 'config.yaml'), 'w') as file:
+        yaml_loader.dump(config, file)
     main(args, config)
